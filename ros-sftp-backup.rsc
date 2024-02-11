@@ -11,17 +11,17 @@
 #
 ### Set local variables. Change the value between "" to reflect your environment. Do not delete quotation marks.
 
-# Server FQDN or IP.
+# Server FQDN or IP
 :local sftpserver "";
-# Server Account Username.
+# Server Account Username
 :local username "";
-# Server Account Password.
+# Server Account Password
 :local password "";
-# Server Path, leave blank to push to root. Path must exist.
+# Server Path, leave blank to push to root. Path must exist
 :local sftppath "";
-# Include date in local file names. Leave false to overwrite single files.
+# Include date in local file names. Leave false to overwrite single files
 :local datelocal false;
-# Remove local file after uploading.
+# Remove local file after uploading
 :local removelocal true;
 # Binary Backup
 :local dobinbackup true;
@@ -48,6 +48,9 @@
 # The Dude Export
 :local dothedude true;
 # User Files to export, comma-separated string or array of strings
+# User Files are not removed on backup
+# Any directory paths will be removed (/ -> _) on remote file
+# Nonpresent files are silently skipped
 :local userfilelist "";
 
 
@@ -56,19 +59,16 @@
 :local hostname [/system identity get name];
 :local date [:pick [/system clock get date] 2 11];
 
-:local lprefix "";
+:local lprefix ($hostname . "-sftpb-");
 :if ($datelocal = true) do={
-  :set lprefix ($hostname . "-" . $date . "-")
-} else={
-  :set lprefix ($hostname . "-")
+  :set lprefix ($lprefix . $date . "-");
 }
 
-:local rprefix "";
-:if ($sftppath = "") do={
-  :set rprefix ($hostname . "-" . $date . "-")
-} else={
-  :set rprefix ($sftppath . "/" . $hostname . "-" . $date . "-")
+:local rprefix ($hostname . "-sftpb-" . $date . "-");
+:if ($sftppath != "") do={
+  :set rprefix ($sftppath . "/" . $rprefix);
 }
+:set rprefix ("/" . $rprefix);
 
 ### SFTP Upload File
 # $1 (ip,string) remote IP or FQDN
@@ -77,8 +77,10 @@
 # $4 (string) local filename to be uploaded
 # $5 (string) remote filename
 :local dosftp do={
-  /tool fetch address=$1 user=$2 password=$3 \
-              src-path=$4 dst-path=$5 mode=sftp upload=yes
+  if ([:len [/file find where name="$4"]] > 0) do={
+    /tool fetch address="$1" user="$2" password="$3" \
+                src-path="$4" dst-path="$5" mode=sftp upload=yes;
+  }
 }
 
 ### SFTP Upload File(s)
@@ -89,11 +91,13 @@
 # string, comma-separated string, or array of strings
 # $5 (string) local prefix, will be stripped from local name
 # $6 (string) remote prefix, will be prepended to remote name
+# NOTE: Directory separators in prefix-stripped filename will be
+# converted to underscore
 :local doprefixsftp do={
   :local filelist [:toarray ""];
 
   if ([:typeof $4] = "str") do={
-    :set filelist [:toarray $2];
+    :set filelist [:toarray $4];
   }
 
   if ([:typeof $4] = "array") do={
@@ -102,15 +106,33 @@
 
   :local index -1;
   :local rfile "";
+  :local rfilef "";
   foreach lfile in=$filelist do={
-    :set index [:find $lfile $5 -1];
-    if ($index = 0) do={
-      :set rfile ($6 . [:pick $lfile [:len $5] [:len $lfile]]);
-    } else={
-      :set rfile ($6 . $lfile);
+    if ([:len [/file find where name="$lfile"]] > 0) do={
+      # Strip Local Prefix if present
+      :set index [:find $lfile $5 -1];
+      if ($index = 0) do={
+        :set rfile [:pick $lfile [:len $5] [:len $lfile]];
+      } else={
+        :set rfile $lfile;
+      }
+
+      # Convert / to _
+      :set rfilef "";
+      :for i from=0 to=([:len $rfile] - 1) do={
+        :local char [:pick $rfile $i];
+        :if ($char = "/") do={
+          :set $char "_";
+        }
+        :set rfilef ($rfilef . $char);
+      }
+
+      # Prepend Remote Prefix
+      :set rfile ($6 . $rfilef);
+
+      /tool fetch address=$1 user=$2 password=$3 \
+                  src-path=$lfile dst-path=$rfile mode=sftp upload=yes;
     }
-    /tool fetch address=$1 user=$2 password=$3 \
-                        src-path=$lfile dst-path=$rfile mode=sftp upload=yes
   }
 }
 
@@ -140,15 +162,13 @@
 # $1 selects action text
 # $2 additional message, usually the backup stage
 :local dolog do={
-  :local msgarr {
-    start="STARTING BACKUP"; \
-    create="CREATING "; \
-    upload="CREATING "; \
-    delete="CREATING "; \
-    finish="FINISHED BACKUP" }
-  }
-  :local msg ($msgarr->"$1");
-  :log info ("SFTP-BACKUP: " . $msg . $2);
+  :local msgarr { start="STARTING BACKUP"; \
+                  clear="CLEARING PREVIOUS "; \
+                  create="CREATING "; \
+                  upload="UPLOADING "; \
+                  delete="DELETING "; \
+                  finish="FINISHED BACKUP" }
+  :log info ("SFTP-BACKUP: " . ($msgarr->"$1") . $2);
 }
 
 :local osver [:pick [/system resource get version] 0 1];
@@ -166,7 +186,7 @@ $dolog "start";
 ### Binary Backup
 if ($dobinbackup = true) do={
   :set cfilename ($lprefix . "backup");
-  :set lfilename ($cfilename . ".backup";
+  :set lfilename ($cfilename . ".backup");
   :set logstage "BINARY BACKUP";
   if ($backupencrypt = false) do={
     /system backup save name=$cfilename dont-encrypt=yes;
@@ -182,7 +202,7 @@ if ($dobinbackup = true) do={
 ### Generic Export
 if ($dogexport = true) do={
   :set cfilename ($lprefix . "export");
-  :set lfilename ($cfilename . ".rsc";
+  :set lfilename ($cfilename . ".rsc");
   :set logstage "GENERIC EXPORT";
   if (($osver = "6" and $exportsensitive = true) or ($osver = "7" and $exportsensitive = false)) do={
     $dolog "create" $logstage;
@@ -193,7 +213,7 @@ if ($dogexport = true) do={
       $dolog "create" $logstage;
       /export compact hide-sensitive file=$cfilename;
     } else={
-      :set logstage ($logstage . "(show-sensitive)");
+      :set logstage ($logstage . " (show-sensitive)");
       $dolog "create" $logstage;
       /export compact show-sensitive file=$cfilename;
     }
@@ -207,18 +227,18 @@ if ($dogexport = true) do={
 ### User Export
 if ($douexport = true) do={
   :set cfilename ($lprefix . "user");
-  :set lfilename ($cfilename . ".rsc";
+  :set lfilename ($cfilename . ".rsc");
   :set logstage "USER EXPORT";
   if (($osver = "6" and $exportsensitive = true) or ($osver = "7" and $exportsensitive = false)) do={
     $dolog "create" $logstage;
     /user export compact file=$cfilename;
   } else={
     if ($osver = "6") do={
-      :set logstage "$logstage (hide-sensitive)";
+      :set logstage ($logstage . " (hide-sensitive)");
       $dolog "create" $logstage;
       /user export compact hide-sensitive file=$cfilename;
     } else={
-      :set logstage "$logstage (show-sensitive)";
+      :set logstage ($logstage . " (show-sensitive)");
       $dolog "create" $logstage;
       /user export compact show-sensitive file=$cfilename;
     }
@@ -237,7 +257,7 @@ if ($dolicense = true and $boardname != "CHR") do={
   $dolog "create" $logstage;
   /system license output;
   $dolog "upload" $logstage;
-  $dosftp $sftpserver $username $password $lfilename $rfilename
+  $dosftp $sftpserver $username $password $lfilename $rfilename;
   if ($removelocal = true) do={$dolog "delete" $logstage;}
   $dodelete $removelocal $lfilename;
 }
@@ -248,10 +268,10 @@ if ($dosshkeys = true) do={
   $dolog "create" $logstage;
   :set cfilename ($lprefix . "host-key");
   /ip ssh export-host-key key-file-prefix=$cfilename;
-  :set lfilearray { ($cfilename . "_dsa";) \
-                    ($cfilename . "_dsa.pub";) \
-                    ($cfilename . "_rsa";) \
-                    ($cfilename . "_rsa.pub") }
+  :set lfilearray [:toarray ""];
+  :foreach lfile in=[/file find where name~"^$cfilename"] do={
+    :set ($lfilearray->([:len $lfilearray])) [/file get $lfile name];
+  }
   $dolog "upload" $logstage;
   $doprefixsftp $sftpserver $username $password $lfilearray $lprefix $rprefix;
   if ($removelocal = true) do={$dolog "delete" $logstage;}
@@ -263,11 +283,10 @@ if ($docertificates = true) do={
   :set logstage "CERTIFICATE EXPORT";
   $dolog "create" $logstage;
   :set lfilearray [:toarray ""];
-  /certificate
-  :foreach cert in=[find] do={
-    :local certname [get $cert name];
+  :foreach cert in=[/certificate find] do={
+    :local certname [/certificate get $cert name];
     :local cfilename ($lprefix . $certname);
-    export-certificate $cert file-name=$cfilename \
+    /certificate export-certificate $cert file-name=$cfilename \
                        type=pkcs12 export-passphrase=$certpassword;
     :set ($lfilearray->([:len $lfilearray])) ($cfilename . ".p12");
   }
@@ -278,12 +297,13 @@ if ($docertificates = true) do={
 }
 
 # User-Manager
-if ($dousermanager = true do={
+if ($dousermanager = true) do={
   :set logstage "USER-MANAGER BACKUP";
   $dolog "create" $logstage;
   :set cfilename ($lprefix . "user-manager");
   :set lfilename ($cfilename . ".umb");
-  $dodelete $removelocal $lfilename;
+  $dolog "clear" $logstage;
+  $dodelete true $lfilename;
   if ($osver = "6") do={
     /tool user-manager database save name=$cfilename;
   }
@@ -296,12 +316,13 @@ if ($dousermanager = true do={
   $dodelete $removelocal $lfilename;
 }
 
-# User-Manager
+# The Dude
 if ($dothedude = true) do={
   :set logstage "THE DUDE BACKUP";
   $dolog "create" $logstage;
   :set lfilename ($lprefix . "the-dude.db");
-  $dodelete $removelocal $lfilename;
+  $dolog "clear" $logstage;
+  $dodelete true $lfilename;
   /dude export-db backup-file=$lfilename;
   $dolog "upload" $logstage;
   $doprefixsftp $sftpserver $username $password $lfilename $lprefix $rprefix;
@@ -309,10 +330,11 @@ if ($dothedude = true) do={
   $dodelete $removelocal $lfilename;
 }
 
+# User File List
 if ([:len $userfilelist] > 0) do={
   :set logstage "USER FILE BACKUP";
   $dolog "upload" $logstage;
-  $doprefixsftp $sftpserver $username $password $lfilename "" $rprefix;
+  $doprefixsftp $sftpserver $username $password $userfilelist "" $rprefix;
 }
 
 ### Finishing the Backup
