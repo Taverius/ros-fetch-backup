@@ -1,4 +1,4 @@
-# ros-sftp-backup
+# ros-fetch-backup
 
 MikroTik RouterOS script to upload nearly all things that can be backed up to an SFTP remote.
 
