@@ -13,13 +13,13 @@
 ### Set local variables. Change the value between "" to reflect your environment. Do not delete quotation marks.
 
 # Server FQDN or IP
-:local sftpserver "";
+:local remoteserver "";
 # Server Account Username
 :local username "";
 # Server Account Password
 :local password "";
 # Server Path, leave blank to push to root. Path must exist
-:local sftppath "";
+:local remotepath "";
 # Include date in local file names. Leave false to overwrite single files
 :local datelocal false;
 # Remove local file after uploading
@@ -67,8 +67,8 @@
 }
 
 :local rprefix ($hostname . "-sftpb-" . $date . "-");
-:if ($sftppath != "") do={
-  :set rprefix ($sftppath . "/" . $rprefix);
+:if ($remotepath != "") do={
+  :set rprefix ($remotepath . "/" . $rprefix);
 }
 :set rprefix ("/" . $rprefix);
 
@@ -322,7 +322,7 @@ if ([:len $userfilelist] > 0) do={
   if ([:len [/file find where name="$lfile"]] > 0) do={
     $dolog stage="upload" msg=($lfile . " AS " . $rfile);
     :do {
-      /tool fetch address=$sftpserver user=$username password=$password \
+      /tool fetch address=$remoteserver user=$username password=$password \
                   src-path=$lfile dst-path=$rfile mode=sftp upload=yes;
     } on-error={$dolog stage="upload" msg=$rfile error=true;}
     if ($clear = true) do={
