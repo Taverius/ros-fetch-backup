@@ -1,5 +1,6 @@
-### RoS SFTP Backup
-### Backs Up nearly everything via SFTP
+### RoS Fetch-based Backup
+### Backs Up nearly everything via /tool fetch
+### (currently only sftp mode is supported)
 #
 ### 2024 Leonardo Valeri Manera
 #
